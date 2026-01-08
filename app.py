@@ -4,7 +4,8 @@ import requests
 # ==========================================
 # CONFIG
 # ==========================================
-API_URL = "http://127.0.0.1:8000"
+# Use your live Render URL here
+API_URL = "https://movie-recommendation-thcv.onrender.com" 
 
 st.set_page_config(
     page_title="CineMatch AI",
@@ -16,59 +17,104 @@ st.set_page_config(
 # ==========================================
 # SESSION STATE
 # ==========================================
-st.session_state.setdefault("page", "home")
-st.session_state.setdefault("selected_movie_query", None)
-st.session_state.setdefault("search_term", "")
+if "page" not in st.session_state:
+    st.session_state.page = "home"
+if "selected_movie_query" not in st.session_state:
+    st.session_state.selected_movie_query = None
+if "search_term" not in st.session_state:
+    st.session_state.search_term = ""
 
 # ==========================================
-# STYLES (HIGH CONTRAST / NETFLIX INSPIRED)
+# STYLES (DOUBLE TONE: DEEP CHARCOAL + VIBRANT RED)
 # ==========================================
 st.markdown("""
 <style>
-.stApp {
-    background: radial-gradient(circle at top, #1b1b1b, #0b0b0b);
-    color: #ffffff;
-}
+    /* Global Background & Font */
+    .stApp {
+        background-color: #0e0e0e; /* Deep Charcoal */
+        color: #e0e0e0;
+        font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    }
+    
+    /* Sidebar Styling */
+    section[data-testid="stSidebar"] {
+        background-color: #000000;
+        border-right: 1px solid #222;
+    }
+    
+    /* Headings */
+    h1, h2, h3 {
+        color: #ffffff !important;
+        font-weight: 700;
+        letter-spacing: 0.5px;
+    }
+    h1 span {
+        color: #E50914; /* Red Brand Accent */
+    }
 
-h1, h2, h3 {
-    color: #ff3d3d !important;
-    font-weight: 800;
-}
+    /* Input Fields (Search) */
+    .stTextInput > div > div > input {
+        background-color: #1f1f1f;
+        color: white;
+        border: 1px solid #333;
+        border-radius: 4px;
+    }
+    .stTextInput > div > div > input:focus {
+        border-color: #E50914;
+        box-shadow: 0 0 8px rgba(229, 9, 20, 0.4);
+    }
+    
+    /* Primary Buttons (Red) */
+    .stButton > button {
+        background-color: #E50914;
+        color: white;
+        border: none;
+        border-radius: 4px;
+        font-weight: bold;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        transition: all 0.3s ease;
+    }
+    .stButton > button:hover {
+        background-color: #ff1f2a;
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(229, 9, 20, 0.4);
+    }
+    
+    /* Movie Titles */
+    .movie-title {
+        color: #fff;
+        font-size: 0.9rem;
+        font-weight: 500;
+        text-align: center;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        margin-top: 8px;
+        margin-bottom: 4px;
+    }
 
-.movie-title {
-    text-align: center;
-    font-size: 0.9rem;
-    font-weight: 600;
-    color: #f5f5f5;
-    margin-top: 6px;
-}
-
-section[data-testid="stSidebar"] {
-    background: linear-gradient(180deg, #141414, #0c0c0c);
-}
-
-.stButton > button {
-    background: linear-gradient(135deg, #ff3d3d, #b31212);
-    color: white;
-    border-radius: 6px;
-    border: none;
-    font-weight: 700;
-}
-
-.stButton > button:hover {
-    background: linear-gradient(135deg, #ff5c5c, #d41414);
-    transform: scale(1.02);
-}
-
-input {
-    background-color: #1f1f1f !important;
-    color: white !important;
-    border: 1px solid #444 !important;
-}
-
-.stTabs [aria-selected="true"] {
-    color: #ff3d3d !important;
-}
+    /* Tabs Styling */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 20px;
+        border-bottom: 1px solid #333;
+    }
+    .stTabs [data-baseweb="tab"] {
+        background-color: transparent;
+        border: none;
+        color: #888;
+    }
+    .stTabs [aria-selected="true"] {
+        color: #E50914 !important;
+        border-bottom: 2px solid #E50914 !important;
+    }
+    
+    /* Sidebar Selectbox */
+    div[data-baseweb="select"] > div {
+        background-color: #1f1f1f;
+        border-color: #333;
+        color: white;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -77,22 +123,18 @@ input {
 # ==========================================
 def get_home_feed(category="popular", limit=24):
     try:
-        r = requests.get(f"{API_URL}/home", params={"category": category, "limit": limit})
+        r = requests.get(f"{API_URL}/home", params={"category": category, "limit": limit}, timeout=5)
         if r.status_code == 200:
             movies = r.json()
-            # 🔥 filter backend warning garbage
-            return [
-                m for m in movies
-                if "use_column_width" not in m.get("title", "").lower()
-            ]
+            # Safety filter
+            return [m for m in movies if isinstance(m, dict) and "title" in m]
         return []
-    except Exception as e:
-        st.error(f"Backend error: {e}")
+    except Exception:
         return []
 
 def search_tmdb(query):
     try:
-        r = requests.get(f"{API_URL}/tmdb/search", params={"query": query})
+        r = requests.get(f"{API_URL}/tmdb/search", params={"query": query}, timeout=5)
         if r.status_code == 200:
             return r.json().get("results", [])
         return []
@@ -101,123 +143,158 @@ def search_tmdb(query):
 
 def get_movie_bundle(query):
     try:
-        r = requests.get(f"{API_URL}/movie/search", params={"query": query})
+        r = requests.get(f"{API_URL}/movie/search", params={"query": query}, timeout=8)
         if r.status_code == 200:
             return r.json()
         return None
     except Exception as e:
-        st.error(e)
+        st.error(f"Connection error: {e}")
         return None
 
 # ==========================================
 # UI COMPONENTS
 # ==========================================
 def render_movie_grid(movies):
-    cols = st.columns(5)
-
+    cols = st.columns(5) # 5-column grid
     for idx, movie in enumerate(movies):
         title = movie.get("title", "Unknown")
-        poster = movie.get("poster_url") or movie.get("poster_path")
-
-        if poster and not poster.startswith("http"):
-            poster = f"https://image.tmdb.org/t/p/w500{poster}"
-
-        if not poster:
-            poster = "https://via.placeholder.com/500x750?text=No+Image"
+        poster_path = movie.get("poster_url") or movie.get("poster_path")
+        
+        # Handle Poster URL
+        if poster_path and not poster_path.startswith("http"):
+            poster_url = f"https://image.tmdb.org/t/p/w500{poster_path}"
+        elif poster_path:
+            poster_url = poster_path
+        else:
+            poster_url = "https://via.placeholder.com/500x750?text=No+Image"
 
         with cols[idx % 5]:
-            st.image(poster, use_container_width=True)
-            st.markdown(f"<div class='movie-title'>{title}</div>", unsafe_allow_html=True)
-
-            if st.button("Select", key=f"select_{idx}", use_container_width=True):
+            # Clean "Card" Layout
+            st.image(poster_url, use_container_width=True)
+            st.markdown(f"<div class='movie-title' title='{title}'>{title}</div>", unsafe_allow_html=True)
+            
+            # Button Key must be unique
+            if st.button("Details", key=f"btn_{idx}_{title[:5]}", use_container_width=True):
                 st.session_state.selected_movie_query = title
                 st.session_state.page = "details"
                 st.rerun()
+            st.write("") # Spacer
 
 # ==========================================
 # PAGES
 # ==========================================
 def home_page():
-    st.title("🎬 CineMatch AI")
-
-    with st.sidebar:
-        st.header("Discover")
-        category = st.selectbox(
-            "Category",
-            ["popular", "trending", "top_rated", "upcoming", "now_playing"],
-        )
-
-    col1, col2 = st.columns([4, 1])
-    with col1:
-        query = st.text_input("Search movies", placeholder="Inception, Batman...")
-    with col2:
-        st.write("")
-        if st.button("Search", use_container_width=True):
-            if query:
-                st.session_state.search_term = query
-                st.session_state.page = "search"
-                st.rerun()
+    # Header Section
+    col_logo, col_search = st.columns([1, 2])
+    with col_logo:
+        st.markdown("# CineMatch <span>AI</span>", unsafe_allow_html=True)
+    
+    with col_search:
+        st.write("") # Spacer for vertical alignment
+        c1, c2 = st.columns([3, 1])
+        with c1:
+            q = st.text_input("Search", placeholder="Search for movies...", label_visibility="collapsed")
+        with c2:
+            if st.button("SEARCH", use_container_width=True):
+                if q:
+                    st.session_state.search_term = q
+                    st.session_state.page = "search"
+                    st.rerun()
 
     st.markdown("---")
-    st.subheader(category.replace("_", " ").title())
 
+    # Sidebar
+    with st.sidebar:
+        st.markdown("### 🧭 Discover")
+        category = st.selectbox(
+            "Browse by",
+            ["popular", "trending", "top_rated", "upcoming", "now_playing"],
+            label_visibility="collapsed"
+        )
+        st.markdown("---")
+        st.info("Select a category to refresh the movie feed.")
+
+    # Main Feed
+    st.markdown(f"### {category.replace('_', ' ').title()}")
     movies = get_home_feed(category)
+    
     if movies:
         render_movie_grid(movies)
     else:
-        st.warning("No movies found.")
+        st.warning("Unable to load movies. Backend might be sleeping.")
 
 def search_page():
-    st.title("🔍 Search Results")
-
-    if st.button("← Back"):
-        st.session_state.page = "home"
-        st.rerun()
-
+    c1, c2 = st.columns([1, 6])
+    with c1:
+        if st.button("← Back"):
+            st.session_state.page = "home"
+            st.rerun()
+    with c2:
+        st.markdown(f"## Results for *'{st.session_state.search_term}'*")
+    
     results = search_tmdb(st.session_state.search_term)
     if results:
         render_movie_grid(results)
     else:
-        st.error("No results found.")
+        st.warning("No results found.")
 
 def details_page():
-    if st.button("← Back"):
+    if st.button("← Back to Home"):
         st.session_state.page = "home"
         st.rerun()
 
-    title = st.session_state.selected_movie_query
-    if not title:
-        st.error("No movie selected.")
-        return
+    query_title = st.session_state.selected_movie_query
+    data = get_movie_bundle(query_title)
 
-    data = get_movie_bundle(title)
     if not data:
+        st.error("Could not load movie details.")
         return
 
     details = data.get("movie_details", {})
-    tfidf_recs = data.get("recommendations", [])
-    genre_recs = data.get("genre_reccommendations", [])
+    recs_ai = [x['tmbd'] for x in data.get("recommendations", []) if x.get('tmbd')]
+    recs_genre = data.get("genre_reccommendations", [])
 
-    col1, col2 = st.columns([1, 2])
-    with col1:
-        if details.get("poster_url"):
-            st.image(details["poster_url"], use_container_width=True)
+    # Movie Details Hero
+    st.markdown(f"## {details.get('title', 'Untitled')}")
+    
+    hero_c1, hero_c2 = st.columns([1, 3])
+    
+    with hero_c1:
+        poster = details.get("poster_url")
+        if poster:
+            st.image(poster, use_container_width=True)
+        else:
+            st.write("No Image")
+            
+    with hero_c2:
+        st.markdown("#### Overview")
+        st.write(details.get("overview", "No overview available."))
+        
+        st.markdown("---")
+        c_stats1, c_stats2 = st.columns(2)
+        with c_stats1:
+            st.markdown(f"**📅 Release Date:** {details.get('release_date', 'N/A')}")
+        with c_stats2:
+            st.markdown(f"**⭐ Rating:** {details.get('vote_average', 'N/A')}/10")
 
-    with col2:
-        st.title(details.get("title"))
-        st.write(details.get("overview", "No overview available"))
-
-    st.markdown("---")
-    tab1, tab2 = st.tabs(["🔥 AI Based", "🍿 Genre Based"])
-
+    # Recommendations Tabs
+    st.markdown("### More Like This")
+    tab1, tab2 = st.tabs(["🔥 AI Recommendations", "🍿 Similar Genre"])
+    
     with tab1:
-        render_movie_grid([r.get("tmbd", {}) for r in tfidf_recs if r.get("tmbd")])
-
+        if recs_ai:
+            render_movie_grid(recs_ai)
+        else:
+            st.info("No AI recommendations available.")
+            
     with tab2:
-        render_movie_grid(genre_recs)
+        if recs_genre:
+            render_movie_grid(recs_genre)
+        else:
+            st.info("No genre recommendations available.")
 
 # ==========================================
-# ROUTER
+# MAIN ROUTER
 # ==========================================
 if st.session_state.page == "home":
     home_page()
