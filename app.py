@@ -5,7 +5,7 @@ import time
 # ==========================================
 # CONFIG
 # ==========================================
-API_URL = "https://movie-recommendation-thcv.onrender.com" 
+
 
 st.set_page_config(
     page_title="CineMatch AI",
@@ -13,6 +13,7 @@ st.set_page_config(
     page_layout="wide",
     initial_sidebar_state="expanded",
 )
+API_URL = "https://movie-recommendation-thcv.onrender.com" 
 
 # ==========================================
 # SESSION STATE
