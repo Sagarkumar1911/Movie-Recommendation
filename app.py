@@ -1,16 +1,16 @@
 import streamlit as st
 import requests
+import time
 
 # ==========================================
 # CONFIG
 # ==========================================
-# Use your live Render URL here
 API_URL = "https://movie-recommendation-thcv.onrender.com" 
 
 st.set_page_config(
     page_title="CineMatch AI",
     page_icon="🎬",
-    layout="wide",
+    page_layout="wide",
     initial_sidebar_state="expanded",
 )
 
@@ -23,6 +23,8 @@ if "selected_movie_query" not in st.session_state:
     st.session_state.selected_movie_query = None
 if "search_term" not in st.session_state:
     st.session_state.search_term = ""
+if "backend_awakened" not in st.session_state:
+    st.session_state.backend_awakened = False
 
 # ==========================================
 # STYLES (DOUBLE TONE: DEEP CHARCOAL + VIBRANT RED)
@@ -119,22 +121,52 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# API HELPERS
+# API HELPERS (WITH COLD START HANDLING)
 # ==========================================
-def get_home_feed(category="popular", limit=24):
+def preflight_wake_check():
+    """Checks if the backend is awake. If not, alerts the recruiter and waits for it to boot."""
+    if st.session_state.backend_awakened:
+        return True
+        
     try:
-        r = requests.get(f"{API_URL}/home", params={"category": category, "limit": limit}, timeout=5)
+        # Quick check targeting the Swagger UI /docs endpoint which loads fast
+        r = requests.get(f"{API_URL}/docs", timeout=3)
+        if r.status_code == 200:
+            st.session_state.backend_awakened = True
+            return True
+    except (requests.exceptions.Timeout, requests.exceptions.ConnectionError):
+        # Server is sleeping! Let's handle it gracefully with a spinner
+        with st.spinner("⏳ Waking up the Machine Learning server on Render's free tier... This can take up to 60 seconds on initial load."):
+            start_time = time.time()
+            # Loop for up to 70 seconds attempting to connect
+            while time.time() - start_time < 70:
+                try:
+                    r = requests.get(f"{API_URL}/docs", timeout=5)
+                    if r.status_code == 200:
+                        st.session_state.backend_awakened = True
+                        st.toast("🚀 Backend server successfully connected!", icon="✅")
+                        return True
+                except:
+                    time.sleep(3) # Wait 3 seconds between retries
+    return False
+
+def get_home_feed(category="popular", limit=24):
+    if not preflight_wake_check():
+        return []
+    try:
+        r = requests.get(f"{API_URL}/home", params={"category": category, "limit": limit}, timeout=10)
         if r.status_code == 200:
             movies = r.json()
-            # Safety filter
             return [m for m in movies if isinstance(m, dict) and "title" in m]
         return []
     except Exception:
         return []
 
 def search_tmdb(query):
+    if not preflight_wake_check():
+        return []
     try:
-        r = requests.get(f"{API_URL}/tmdb/search", params={"query": query}, timeout=5)
+        r = requests.get(f"{API_URL}/tmdb/search", params={"query": query}, timeout=10)
         if r.status_code == 200:
             return r.json().get("results", [])
         return []
@@ -142,8 +174,10 @@ def search_tmdb(query):
         return []
 
 def get_movie_bundle(query):
+    if not preflight_wake_check():
+        return None
     try:
-        r = requests.get(f"{API_URL}/movie/search", params={"query": query}, timeout=8)
+        r = requests.get(f"{API_URL}/movie/search", params={"query": query}, timeout=15)
         if r.status_code == 200:
             return r.json()
         return None
@@ -160,7 +194,6 @@ def render_movie_grid(movies):
         title = movie.get("title", "Unknown")
         poster_path = movie.get("poster_url") or movie.get("poster_path")
         
-        # Handle Poster URL
         if poster_path and not poster_path.startswith("http"):
             poster_url = f"https://image.tmdb.org/t/p/w500{poster_path}"
         elif poster_path:
@@ -169,11 +202,9 @@ def render_movie_grid(movies):
             poster_url = "https://via.placeholder.com/500x750?text=No+Image"
 
         with cols[idx % 5]:
-            # Clean "Card" Layout
             st.image(poster_url, use_container_width=True)
             st.markdown(f"<div class='movie-title' title='{title}'>{title}</div>", unsafe_allow_html=True)
             
-            # Button Key must be unique
             if st.button("Details", key=f"btn_{idx}_{title[:5]}", use_container_width=True):
                 st.session_state.selected_movie_query = title
                 st.session_state.page = "details"
@@ -184,13 +215,12 @@ def render_movie_grid(movies):
 # PAGES
 # ==========================================
 def home_page():
-    # Header Section
     col_logo, col_search = st.columns([1, 2])
     with col_logo:
         st.markdown("# CineMatch <span>AI</span>", unsafe_allow_html=True)
     
     with col_search:
-        st.write("") # Spacer for vertical alignment
+        st.write("") 
         c1, c2 = st.columns([3, 1])
         with c1:
             q = st.text_input("Search", placeholder="Search for movies...", label_visibility="collapsed")
@@ -203,7 +233,6 @@ def home_page():
 
     st.markdown("---")
 
-    # Sidebar
     with st.sidebar:
         st.markdown("### 🧭 Discover")
         category = st.selectbox(
@@ -214,14 +243,13 @@ def home_page():
         st.markdown("---")
         st.info("Select a category to refresh the movie feed.")
 
-    # Main Feed
     st.markdown(f"### {category.replace('_', ' ').title()}")
     movies = get_home_feed(category)
     
     if movies:
         render_movie_grid(movies)
     else:
-        st.warning("Unable to load movies. Backend might be sleeping.")
+        st.warning("⚠️ Could not establish a connection to the Machine Learning server. Please refresh the page to retry.")
 
 def search_page():
     c1, c2 = st.columns([1, 6])
@@ -254,7 +282,6 @@ def details_page():
     recs_ai = [x['tmbd'] for x in data.get("recommendations", []) if x.get('tmbd')]
     recs_genre = data.get("genre_reccommendations", [])
 
-    # Movie Details Hero
     st.markdown(f"## {details.get('title', 'Untitled')}")
     
     hero_c1, hero_c2 = st.columns([1, 3])
@@ -277,7 +304,6 @@ def details_page():
         with c_stats2:
             st.markdown(f"**⭐ Rating:** {details.get('vote_average', 'N/A')}/10")
 
-    # Recommendations Tabs
     st.markdown("### More Like This")
     tab1, tab2 = st.tabs(["🔥 AI Recommendations", "🍿 Similar Genre"])
     
